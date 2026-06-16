@@ -15,7 +15,7 @@ Patient identity data is fully HIPAA-compliant (Safe Harbor method): no names, n
 
 | Name | Taken by |
 |------|----------|
-| **ClinicalPulse** | Your other project — Cardiovascular, Endocrine & Mental Health |
+| **ClinicalPulse** | MySQL-powered Cardiovascular, Endocrine & Mental Health analytics |
 | **GlucoseIQ** | This project — Diabetes-focused, signals both the clinical biomarker and the analytics intelligence layer |
 
 ---
