@@ -1,5 +1,7 @@
 # Diabetes Onset & 30-Day Readmission Risk Analysis
 
+**[Click here to view the full interactive notebook report](https://abhijeethganji99.github.io/GlucoseIQ/)**
+
 End-to-end healthcare analytics project combining real patient-level survey data, real claims-style patient records, and a live CMS public API to predict diabetes onset and 30-day hospital readmission risk.
 
 ## Overview
