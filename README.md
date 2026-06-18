@@ -1,203 +1,71 @@
-# GlucoseIQ
-**End-to-end Diabetes Patient Analytics powered by real UCI + Kaggle clinical data and 4 live CMS Medicare Tier 1 APIs — MySQL · Python · Scikit-learn · Plotly**
+# Diabetes Onset & 30-Day Readmission Risk Analysis
 
----
+End-to-end healthcare analytics project combining real patient-level survey data, real claims-style patient records, and a live CMS public API to predict diabetes onset and 30-day hospital readmission risk.
 
-## Project Overview
+## Overview
 
-GlucoseIQ is a full-stack healthcare data analytics project that combines real patient-level clinical datasets with live U.S. government Medicare APIs to build a 6-table EHR database, run 10 SQL business questions, train two ML models, and produce a 12-chart visualization dashboard — all inside a single Jupyter notebook.
-
-Patient identity data is fully HIPAA-compliant (Safe Harbor method): no names, no dates of birth, no SSNs, no MRNs, no addresses. Clinical features (HbA1c, glucose, BMI, insulin, blood pressure) come from real public research datasets. Drug, hospital, and population benchmark data pull live from CMS Medicare APIs at runtime.
-
----
-
-## Project Name Rationale
-
-| Name | Taken by |
-|------|----------|
-| **ClinicalPulse** | MySQL-powered Cardiovascular, Endocrine & Mental Health analytics |
-| **GlucoseIQ** | This project — Diabetes-focused, signals both the clinical biomarker and the analytics intelligence layer |
-
----
+This project builds a MySQL-backed clinical data pipeline, segments patients via unsupervised learning, and trains two independently validated logistic regression models — one predicting diabetes onset on a large real-world population health survey, and one predicting 30-day readmission risk on a patient-level clinical dataset enriched with live CMS hospital quality data.
 
 ## Data Sources
 
-### Patient-Level Clinical Data (individual rows)
+| Source | Description | Status |
+|---|---|---|
+| UCI CDC Diabetes Health Indicators (id=891) | 253,680 real BRFSS survey respondents — health indicators, lifestyle, and demographics | Live, confirmed working |
+| Kaggle Diabetes Prediction Dataset | 100,000 patient-level records with lab values, vitals, and admission outcomes | Live, confirmed working |
+| CMS Hospital Quality API | Live provider-level hospital quality data | Live, confirmed working |
+| CMS Part D Prescribers | Medicare prescriber drug claims | Retired (HTTP 410) — fallback schema used |
+| CMS Inpatient DRG | Medicare inpatient length-of-stay and cost data | Retired (HTTP 410) — fallback schema used |
+| CMS Chronic Conditions | State-level chronic disease prevalence | Retired (HTTP 410) — fallback schema used |
 
-| Source | Method | Patients | Key Fields |
-|--------|--------|----------|------------|
-| UCI Pima Indians Diabetes (NIDDK 1988) | `fetch_ucirepo(id=34)` | 768 | glucose, insulin, BMI, blood pressure, diabetes outcome |
-| Kaggle Diabetes Prediction Dataset | `pd.read_csv()` | 100,000 | HbA1c, glucose, BMI, smoking history, diabetes outcome |
+The diabetes-onset model and the readmission model are trained on two separate datasets rather than one merged table. The CDC survey dataset (categorical health/lifestyle indicators) and the Kaggle dataset (continuous lab values) don't share a compatible schema, so merging them would have meant fabricating overlap that doesn't exist in the source data. Keeping them separate was the more honest choice.
 
-### CMS Medicare Tier 1 APIs (live · free · no login required)
+## Pipeline
 
-| # | API | Endpoint | What It Provides |
-|---|-----|----------|-----------------|
-| C | CMS Part D Prescribers | `data.cms.gov/resource/tau9-gfsr.json` | Real diabetes drug prescriptions, claim volumes, costs by provider |
-| D | CMS Hospital Quality | `data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0` | Real hospital star ratings, 30-day readmission rates, 4,000+ hospitals |
-| E | CMS Inpatient DRG | `data.cms.gov/resource/tcsp-6e99.json` | Real average LOS and payments per diabetes DRG code |
-| F | CMS Chronic Conditions | `data.cms.gov/resource/cng4-92f3.json` | Real diabetes prevalence by US state for Medicare beneficiaries |
+1. **Environment setup** — MySQL instance, Python ML/stats stack
+2. **Data extraction** — UCI CDC891 survey data, Kaggle patient records, CMS Hospital Quality API
+3. **Database build** — six normalized tables (Patients, LabResults, VitalSigns, Prescriptions, HospitalBenchmarks, Admissions) loaded via SQLAlchemy
+4. **Cleaning** — null/duplicate/outlier detection (Pandas, NumPy, Missingno), group-median imputation, winsorization
+5. **SQL analysis** — joins, CTEs, window functions (RANK, NTILE) to answer cohort-level business questions
+6. **Unsupervised segmentation** — KMeans clustering (k selected via elbow method and silhouette score), PCA for visualization
+7. **Predictive modeling** — logistic regression for both diabetes onset and readmission risk, evaluated via ROC-AUC, confusion matrices, and classification reports
+8. **Visualization** — 12-panel dashboard plus supporting EDA and correlation charts (Matplotlib, Seaborn, Plotly)
 
-All 4 CMS API calls are wrapped in a `cms_get()` error handler — the notebook runs fully even if an endpoint is temporarily unavailable.
+## Results
 
----
+**Diabetes onset prediction** (UCI CDC891, 253,680 patients)
+- ROC-AUC: 0.815
+- Accuracy: 72.8%
+- Trained on 202,944 patients, tested on 50,736
+- Features: age, BMI, hypertension, high cholesterol, heart disease, smoking status, stroke history, physical activity, general/mental/physical health ratings, difficulty walking
 
-## HIPAA Compliance & Data Transparency
+**30-day readmission prediction** (Kaggle-based patient table, 100,000 patients)
+- ROC-AUC: 0.672
+- Accuracy: 90.0%
+- Trained on 80,000 patients, tested on 20,000
+- Features: age, BMI, HbA1c, blood glucose, hypertension, heart disease, diabetes status, length of stay, comorbidity count
 
-This project follows the **HIPAA Safe Harbor method** for de-identification. None of the 18 PHI identifiers are present:
+A note on the readmission accuracy figure: the real-world readmission rate in this dataset is 7.5%, meaning a model that predicted "never readmitted" for every patient would score 92.5% accuracy without learning anything. The 90.0% figure is reported for completeness, but ROC-AUC (0.672) is the metric that actually reflects this model's genuine, above-chance predictive signal on an imbalanced outcome.
 
-- No patient names
-- No dates of birth (age stored as a numeric value only)
-- No SSNs, MRNs, or account numbers
-- No addresses, zip codes, or geographic data below state level
-- No phone numbers, email addresses, or IP addresses
-- `patient_id` is a generated row index (`PID000001`) with no link to any real individual
+**Patient segmentation**
+- 4 KMeans clusters (selected via silhouette score)
+- 53.6% variance explained by the first 2 PCA components
 
-### Data Transparency — Three Tiers
-
-| Column | Source | Type |
-|--------|--------|------|
-| HbA1c, glucose, BMI, insulin, blood pressure | UCI Pima + Kaggle datasets | ✅ Real clinical measurements |
-| Drug names, claim volumes, drug costs | CMS Part D API | ✅ Real Medicare data |
-| Hospital names, star ratings, readmission rates | CMS Hospital Quality API | ✅ Real Medicare data |
-| Diabetes prevalence by state | CMS Chronic Conditions API | ✅ Real Medicare data |
-| `los_days`, `is_readmitted` | `np.random.normal` seeded to CMS DRG benchmarks | ⚠️ Statistically derived |
-| `primary_diagnosis` ICD codes | Rule-assigned from diabetes flag | ⚠️ Derived, not from real claims |
-
-> **Portfolio disclosure:** LOS and readmission outcomes are statistically derived using CMS Medicare DRG benchmark distributions. All clinical features (HbA1c, glucose, BMI, insulin) are from real public datasets.
-
----
-
-## Database Schema — 6-Table EHR in MySQL
+## Repository Structure
 
 ```
-diabetes_ehr_db
-├── Patients           ← UCI + Kaggle (demographics, diagnosis, risk score)
-├── LabResults         ← UCI + Kaggle (HbA1c, blood glucose, insulin, flags)
-├── VitalSigns         ← UCI Pima (blood pressure, BMI, skin thickness)
-├── Prescriptions      ← CMS Part D API (real drug names, costs, claim data)
-├── HospitalBenchmarks ← CMS Hospital Quality API (star ratings, readmission rates)
-└── Admissions         ← CMS DRG-benchmarked LOS + readmission flags
+notebook.ipynb              full pipeline, end to end
+diabetes_dashboard.png      12-panel patient analytics dashboard
+ml_models.png               confusion matrices + feature coefficients for both models
+clustering_elbow.png        KMeans elbow/silhouette diagnostics
+clustering_pca.png          PCA-projected patient segments
+eda_overview.png            population-level distributions
+eda_correlation.png         clinical feature correlation heatmap
 ```
 
----
+## Stack
 
-## Project Phases
+Python, MySQL, SQLAlchemy, Pandas, NumPy, Scikit-learn, SciPy, Matplotlib, Seaborn, Plotly, Missingno
 
-| Phase | Description | Tools |
-|-------|-------------|-------|
-| 1 | Environment setup, MySQL install, DB creation | Python, MySQL |
-| 2 | 6-source data extraction — UCI + Kaggle + 4 CMS APIs | `ucimlrepo`, `requests`, `pd.read_csv()` |
-| 3 | 6-table schema + bulk load into MySQL | SQLAlchemy, `to_sql()` |
-| 4 | SQL extraction — multi-table JOINs back to DataFrames | `mysql-connector`, CTEs |
-| 5 | Data cleaning — nulls, type coercions, outlier handling | pandas, numpy, missingno |
-| 6 | EDA — diabetes distributions, correlations, heatmaps | matplotlib, seaborn |
-| 7 | KMeans patient segmentation (4 clusters + PCA) | scikit-learn |
-| 8 | Statistical analysis — t-tests, chi-square, ANOVA, Pearson | scipy |
-| 9 | 10 Business Questions — SQL KPIs with window functions | CTEs, RANK, NTILE, LAG |
-| 10 | 12-chart visualization dashboard + Plotly interactive scatter | matplotlib, seaborn, plotly |
-| 11 | ML models — diabetes prediction + readmission prediction | LogisticRegression, ROC-AUC |
-| 12 | Clinical insights and recommendations | markdown |
-| 13 | Export — CSV files + 11-sheet Excel workbook | pandas, openpyxl |
+## Notes on Reproducibility
 
----
-
-## Business Questions Answered (Phase 9)
-
-1. Diabetes rate by age group
-2. Drug class outcomes — readmission rate and avg cost per claim (CMS-enriched)
-3. HbA1c tier distribution and readmission risk
-4. Triple burden patients — diabetes + hypertension + heart disease
-5. Hospital quality benchmarking by state (CMS data)
-6. LOS and cost analysis by BMI category
-7. Risk category distribution across the patient population
-8. Drug prescribing patterns by patient risk tier
-9. High-risk patient cohort identification (SQL CTE)
-10. Window function — cumulative LOS by risk category
-
----
-
-## ML Models (Phase 11)
-
-### Model 1 — Diabetes Prediction
-- **Algorithm:** Logistic Regression with class balancing
-- **Features:** age, BMI, HbA1c, blood glucose, insulin, hypertension, heart disease, blood pressure
-- **Top predictors:** HbA1c > blood glucose > BMI > age > hypertension
-
-### Model 2 — Readmission Prediction
-- **Algorithm:** Logistic Regression with class balancing
-- **Features:** age, BMI, HbA1c, blood glucose, hypertension, heart disease, diabetes, LOS, comorbidity count
-- **Top predictors:** comorbidity count > diabetes > HbA1c > LOS > hypertension
-
-Both models output confusion matrices, classification reports, ROC-AUC scores, and feature coefficient charts.
-
----
-
-## Tech Stack
-
-```
-Language     Python 3.x
-Database     MySQL 8 (local via subprocess)
-APIs         requests — 4 live CMS Socrata REST endpoints
-             ucimlrepo — UCI ML Repository API
-Data         pandas, numpy
-Viz          matplotlib, seaborn, plotly
-ML           scikit-learn (KMeans, PCA, LogisticRegression, ROC-AUC)
-Stats        scipy (t-test, chi-square, ANOVA, Pearson)
-DB layer     SQLAlchemy, mysql-connector-python
-Export       openpyxl (11-sheet Excel), CSV
-```
-
----
-
-## Outputs
-
-| File | Contents |
-|------|----------|
-| `patients_master.csv` | Full merged patient table |
-| `prescriptions_cms_partd.csv` | CMS drug data mapped to patients |
-| `hospital_benchmarks_cms.csv` | Real hospital quality data |
-| `cms_diabetes_by_state.csv` | State-level prevalence from CMS |
-| `diabetes_dashboard.png` | 12-chart static dashboard |
-| `plotly_diabetes_scatter.html` | Interactive HbA1c vs glucose scatter |
-| `ml_models.png` | Confusion matrices + feature coefficients |
-| `Diabetes_Analytics_CMS_Report.xlsx` | 11-sheet Excel workbook |
-
----
-
-## Setup
-
-```bash
-# Install dependencies (notebook handles this automatically in Phase 1)
-pip install mysql-connector-python sqlalchemy pandas numpy matplotlib seaborn \
-            plotly scipy statsmodels scikit-learn missingno tabulate \
-            openpyxl ucimlrepo requests
-
-# For Kaggle dataset (optional — notebook has 2 fallbacks if unavailable)
-kaggle datasets download -d iammustafatz/diabetes-prediction-dataset --unzip
-```
-
-Run all cells top-to-bottom. MySQL is installed and configured automatically in Phase 1.
-
----
-
-## Repo Structure
-
-```
-glucoseiq/
-├── Diabetes_Analytics_CMS_Tier1.ipynb   ← Main notebook (all 13 phases)
-├── diabetes_prediction_dataset.csv       ← Kaggle dataset (if pre-downloaded)
-├── README.md
-└── outputs/
-    ├── diabetes_dashboard.png
-    ├── plotly_diabetes_scatter.html
-    ├── ml_models.png
-    ├── Diabetes_Analytics_CMS_Report.xlsx
-    └── *.csv
-```
-
----
-
-## Related Project
-
-**ClinicalPulse** — MySQL-powered Cardiovascular, Endocrine & Mental Health analytics using real CMS Medicare data with HIPAA-compliant synthetic patients.
+This pipeline was run end-to-end with full internet access (Google Colab) to fetch live data from UCI and the CMS Hospital Quality API. Running it in a network-restricted environment will cause the UCI fetch to fail and the model results to fall back to synthetic data, which will not reproduce the metrics reported above. The three retired CMS endpoints will return HTTP 410 regardless of environment, by design of the fallback logic.
